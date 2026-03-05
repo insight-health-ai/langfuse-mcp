@@ -208,6 +208,40 @@ def test_negative_age_rejected(state):
         )
 
 
+def test_age_above_max_rejected(state):
+    """Age above configured max should be rejected."""
+    from langfuse_mcp.__main__ import MAX_AGE_MINUTES, fetch_traces
+
+    ctx = FakeContext(state)
+    with pytest.raises(ValueError):
+        asyncio.run(
+            fetch_traces(
+                ctx,
+                age=MAX_AGE_MINUTES + 1,
+                name=None,
+                user_id=None,
+                session_id=None,
+                metadata=None,
+                page=1,
+                limit=10,
+                tags=None,
+                include_observations=False,
+                output_mode="compact",
+            )
+        )
+
+
+def test_parse_max_age_minutes():
+    """Max age env parser should accept valid values and fall back on invalid ones."""
+    from langfuse_mcp.__main__ import _parse_max_age_minutes
+
+    assert _parse_max_age_minutes("129600", default=10080) == 129600
+    assert _parse_max_age_minutes("0", default=10080) == 10080
+    assert _parse_max_age_minutes("-1", default=10080) == 10080
+    assert _parse_max_age_minutes("abc", default=10080) == 10080
+    assert _parse_max_age_minutes(None, default=10080) == 10080
+
+
 def test_truncate_large_strings_case_insensitive():
     """Large field detection should be case-insensitive."""
     from langfuse_mcp.__main__ import MAX_FIELD_LENGTH, truncate_large_strings

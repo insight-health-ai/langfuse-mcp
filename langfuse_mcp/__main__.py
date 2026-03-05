@@ -88,7 +88,32 @@ logger = logging.getLogger("langfuse_mcp")
 # Constants
 HOUR = 60  # minutes
 DAY = 24 * HOUR
-MAX_AGE_MINUTES = 7 * DAY
+DEFAULT_MAX_AGE_MINUTES = 7 * DAY
+
+
+def _parse_max_age_minutes(raw_value: str | None, default: int = DEFAULT_MAX_AGE_MINUTES) -> int:
+    """Parse max age from env value and fall back to default on invalid input."""
+    if raw_value is None or raw_value == "":
+        return default
+
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid LANGFUSE_MCP_MAX_AGE_MINUTES value '%s'; using default of %s minutes", raw_value, default
+        )
+        return default
+
+    if parsed <= 0:
+        logger.warning(
+            "LANGFUSE_MCP_MAX_AGE_MINUTES must be positive; got %s. Using default of %s minutes", parsed, default
+        )
+        return default
+
+    return parsed
+
+
+MAX_AGE_MINUTES = _parse_max_age_minutes(os.getenv("LANGFUSE_MCP_MAX_AGE_MINUTES"))
 MAX_FIELD_LENGTH = 500  # Maximum string length for field values
 MAX_RESPONSE_SIZE = 20000  # Maximum size of response object in characters
 TRUNCATE_SUFFIX = "..."  # Suffix to add to truncated fields
@@ -950,7 +975,7 @@ class ExceptionCount(BaseModel):
 
 
 def validate_age(age: int) -> int:
-    """Validate that age is positive and ≤ 7 days.
+    """Validate that age is positive and does not exceed the configured maximum.
 
     Args:
         age: Age in minutes to validate
@@ -959,7 +984,7 @@ def validate_age(age: int) -> int:
         The validated age if it passes validation
 
     Raises:
-        ValueError: If age is not positive or exceeds 7 days (10080 minutes)
+        ValueError: If age is not positive or exceeds configured maximum age
     """
     if age <= 0:
         raise ValueError("Age must be positive")
@@ -970,7 +995,7 @@ def validate_age(age: int) -> int:
 
 
 ValidatedAge = Annotated[int, AfterValidator(validate_age)]
-"""Type for validated age values (positive integer up to 7 days/10080 minutes)"""
+"""Type for validated age values (positive integer up to configured maximum age)"""
 
 
 def clear_caches(state: MCPState) -> None:
@@ -1804,7 +1829,10 @@ async def get_user_sessions(
 async def find_exceptions(
     ctx: Context,
     age: ValidatedAge = Field(
-        ..., description="Number of minutes to look back (positive integer, max 7 days/10080 minutes)", gt=0, le=MAX_AGE_MINUTES
+        ...,
+        description="Number of minutes to look back (positive integer, max configured by LANGFUSE_MCP_MAX_AGE_MINUTES)",
+        gt=0,
+        le=MAX_AGE_MINUTES,
     ),
     group_by: Literal["file", "function", "type"] = Field(
         "file",
@@ -1817,7 +1845,7 @@ async def find_exceptions(
 
     Args:
         ctx: Context object containing lifespan context with Langfuse client
-        age: Number of minutes to look back (positive integer, max 7 days/10080 minutes)
+        age: Number of minutes to look back (positive integer, max configured by LANGFUSE_MCP_MAX_AGE_MINUTES)
         group_by: How to group exceptions - "file" groups by filename, "function" groups by function name,
                   or "type" groups by exception type
 
@@ -1895,7 +1923,10 @@ async def find_exceptions_in_file(
     ctx: Context,
     filepath: str = Field(..., description="Path to the file to search for exceptions (full path including extension)"),
     age: ValidatedAge = Field(
-        ..., description="Number of minutes to look back (positive integer, max 7 days/10080 minutes)", gt=0, le=MAX_AGE_MINUTES
+        ...,
+        description="Number of minutes to look back (positive integer, max configured by LANGFUSE_MCP_MAX_AGE_MINUTES)",
+        gt=0,
+        le=MAX_AGE_MINUTES,
     ),
     output_mode: OUTPUT_MODE_LITERAL = Field(
         "compact",
@@ -1912,7 +1943,7 @@ async def find_exceptions_in_file(
     Args:
         ctx: Context object containing lifespan context with Langfuse client
         filepath: Path to the file to search for exceptions (full path including extension)
-        age: Number of minutes to look back (positive integer, max 7 days/10080 minutes)
+        age: Number of minutes to look back (positive integer, max configured by LANGFUSE_MCP_MAX_AGE_MINUTES)
         output_mode: Controls the output format and detail level
 
     Returns:
@@ -2148,14 +2179,17 @@ async def get_exception_details(
 async def get_error_count(
     ctx: Context,
     age: ValidatedAge = Field(
-        ..., description="Number of minutes to look back (positive integer, max 7 days/10080 minutes)", gt=0, le=MAX_AGE_MINUTES
+        ...,
+        description="Number of minutes to look back (positive integer, max configured by LANGFUSE_MCP_MAX_AGE_MINUTES)",
+        gt=0,
+        le=MAX_AGE_MINUTES,
     ),
 ) -> ResponseDict:
     """Get number of traces with exceptions in last N minutes.
 
     Args:
         ctx: Context object containing lifespan context with Langfuse client
-        age: Number of minutes to look back (positive integer, max 7 days/10080 minutes)
+        age: Number of minutes to look back (positive integer, max configured by LANGFUSE_MCP_MAX_AGE_MINUTES)
 
     Returns:
         Dictionary with error statistics including trace count, observation count, and exception count

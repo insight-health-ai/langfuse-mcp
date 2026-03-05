@@ -117,6 +117,16 @@ LANGFUSE_MCP_READ_ONLY=true langfuse-mcp
 
 This disables: `create_text_prompt`, `create_chat_prompt`, `update_prompt_labels`, `create_dataset`, `create_dataset_item`, `delete_dataset_item`
 
+## Configure Max Lookback
+
+By default, tools that use an `age` parameter allow up to 7 days (`10080` minutes).
+You can override this limit with `LANGFUSE_MCP_MAX_AGE_MINUTES`.
+
+```bash
+# 90 days
+LANGFUSE_MCP_MAX_AGE_MINUTES=129600 langfuse-mcp
+```
+
 ## Other Clients
 
 ### Cursor
