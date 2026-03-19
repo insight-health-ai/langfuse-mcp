@@ -109,18 +109,16 @@ def test_fetch_sessions(state):
 
 
 def test_get_session_details(state):
-    """get_session_details should reuse the v3 traces resource."""
+    """get_session_details should fetch the session via the v3 sessions resource."""
     from langfuse_mcp.__main__ import get_session_details
 
     ctx = FakeContext(state)
     result = asyncio.run(get_session_details(ctx, session_id="session_1", include_observations=True, output_mode="compact"))
     assert result["data"]["found"] is True
     assert result["data"]["trace_count"] == 1
-    assert state.langfuse_client.api.trace.last_list_kwargs is not None
-    trace_kwargs = state.langfuse_client.api.trace.last_list_kwargs
-    assert trace_kwargs["session_id"] == "session_1"
-    # Regression: Langfuse ClickHouse rejects epoch-zero DateTime64 filters.
-    assert "from_timestamp" not in trace_kwargs
+    assert state.langfuse_client.api.sessions.last_get_kwargs == {"session_id": "session_1"}
+    assert state.langfuse_client.api.trace.last_list_kwargs is None
+    assert state.langfuse_client.api.trace.last_get_kwargs == {"trace_id": "trace_1"}
 
 
 def test_get_exception_details_omits_time_filters(state):

@@ -617,6 +617,14 @@ def _list_sessions(
     return _extract_items_from_response(response)
 
 
+def _get_session(langfuse_client: Any, session_id: str) -> Any:
+    """Fetch a single session via the Langfuse SDK."""
+    if not hasattr(langfuse_client, "api") or not hasattr(langfuse_client.api, "sessions"):
+        raise RuntimeError("Unsupported Langfuse client: no session getter available")
+
+    return langfuse_client.api.sessions.get(session_id=session_id)
+
+
 def truncate_large_strings(
     obj: Any,
     max_length: int = MAX_FIELD_LENGTH,
@@ -1614,24 +1622,10 @@ async def get_session_details(
     state = cast(MCPState, ctx.request_context.lifespan_context)
 
     try:
-        # Fetch traces with this session ID
-        trace_items, pagination = _list_traces(
-            state.langfuse_client,
-            limit=50,
-            page=1,
-            include_observations=include_observations,
-            tags=None,
-            from_timestamp=None,
-            name=None,
-            user_id=None,
-            session_id=session_id,
-            metadata=None,
-        )
-
-        # If no traces were found, return an empty dict
         mode = _ensure_output_mode(output_mode)
+        session_payload = _sdk_object_to_python(_get_session(state.langfuse_client, session_id=session_id)) or {}
 
-        if not trace_items:
+        if not isinstance(session_payload, dict) or not session_payload.get("id"):
             logger.info(f"No session found with ID: {session_id}")
             empty_session = {"id": session_id, "traces": [], "trace_count": 0, "found": False}
             processed_session, file_meta = process_data_with_mode(empty_session, mode, f"session_{session_id}", state)
@@ -1643,8 +1637,24 @@ async def get_session_details(
                 metadata_block.update(file_meta)
             return {"data": processed_session, "metadata": metadata_block}
 
-        # Convert traces to a serializable format
-        raw_traces = [_sdk_object_to_python(trace) for trace in trace_items]
+        raw_traces: list[dict[str, Any]] = []
+        session_traces = session_payload.get("traces")
+        if isinstance(session_traces, list) and session_traces:
+            for trace in session_traces:
+                trace_payload = _sdk_object_to_python(trace)
+                if isinstance(trace_payload, dict) and trace_payload:
+                    raw_traces.append(trace_payload)
+        else:
+            trace_ids = session_payload.get("trace_ids") or session_payload.get("traceIds") or []
+            if isinstance(trace_ids, list):
+                for trace_id in trace_ids:
+                    if not isinstance(trace_id, str) or not trace_id:
+                        continue
+                    trace_payload = _sdk_object_to_python(_get_trace(state.langfuse_client, trace_id, include_observations))
+                    if isinstance(trace_payload, dict) and trace_payload:
+                        raw_traces.append(trace_payload)
+
+        raw_traces.sort(key=lambda trace: _datetime_sort_key(trace.get("timestamp") or trace.get("created_at")))
 
         # If include_observations is True, fetch and embed the full observation objects
         if include_observations and raw_traces:
@@ -1653,14 +1663,18 @@ async def get_session_details(
                 logger.info(f"Fetching full observation details for {total_observations} observations across {len(raw_traces)} traces")
                 await _embed_observations_in_traces(state, raw_traces)
 
+        first_timestamp = (raw_traces[0].get("timestamp") or raw_traces[0].get("created_at")) if raw_traces else None
+        last_timestamp = (raw_traces[-1].get("timestamp") or raw_traces[-1].get("created_at")) if raw_traces else None
+
         # Create a session object with all traces that have this session ID
         session = {
-            "id": session_id,
+            **session_payload,
+            "id": session_payload.get("id", session_id),
             "traces": raw_traces,
             "trace_count": len(raw_traces),
-            "first_timestamp": raw_traces[0].get("timestamp") if raw_traces else None,
-            "last_timestamp": raw_traces[-1].get("timestamp") if raw_traces else None,
-            "user_id": raw_traces[0].get("user_id") if raw_traces else None,
+            "first_timestamp": first_timestamp,
+            "last_timestamp": last_timestamp,
+            "user_id": session_payload.get("user_id") or (raw_traces[0].get("user_id") if raw_traces else None),
             "found": True,
         }
 
